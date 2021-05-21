@@ -15,7 +15,7 @@ setup(
     description="Python toolkit for analysis, visualization, and comparison of spike sorting output",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/alejoe91/spiketoolkit",
+    url="https://github.com/KnierimLab/spiketoolkit",
     packages=find_packages(),
     package_data={},
     install_requires=[
