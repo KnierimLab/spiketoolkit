@@ -20,8 +20,8 @@ setup(
     package_data={},
     install_requires=[
         'numpy',
-        'spikeextractors',
-        'spikemetrics>=0.2.0',
+        'spikeextractors>=0.9.4',
+        'spikemetrics>=0.2.4',
         'spikefeatures',
         'scikit-learn',
         'scipy',

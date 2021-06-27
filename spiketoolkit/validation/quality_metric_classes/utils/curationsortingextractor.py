@@ -11,6 +11,8 @@ class CurationSortingExtractor(SortingExtractor):
         self._parent_sorting = parent_sorting
         self._original_unit_ids = list(np.copy(parent_sorting.get_unit_ids()))
         self._all_ids = list(np.copy(parent_sorting.get_unit_ids()))
+        self._sampling_frequency = parent_sorting.get_sampling_frequency()
+        self.set_tmp_folder(parent_sorting.get_tmp_folder())
 
         # Create and store roots with original unit ids and cached spiketrains
         self._roots = []
@@ -25,6 +27,8 @@ class CurationSortingExtractor(SortingExtractor):
         '''
         self.copy_unit_properties(parent_sorting)
         self.copy_unit_spike_features(parent_sorting)
+        self.copy_epochs(parent_sorting)
+        self.copy_times(parent_sorting)
 
         self.curation_steps = curation_steps
         self._kwargs = {'parent_sorting': parent_sorting.make_serialized_dict(), 'curation_steps': self.curation_steps}
@@ -76,9 +80,6 @@ class CurationSortingExtractor(SortingExtractor):
             return spike_train
         else:
             raise ValueError(str(unit_id) + " is an invalid unit id")
-
-    def get_sampling_frequency(self):
-        return self._parent_sorting.get_sampling_frequency()
 
     def print_curation_tree(self, unit_id):
         '''This function prints the current curation tree for the unit_id (roots are current unit ids).
@@ -265,7 +266,7 @@ class CurationSortingExtractor(SortingExtractor):
             except IndexError:
                 print(str(indices) + " out of bounds for the spike train of " + str(unit_id))
 
-            indices_2 = np.array(list(set(range(len(original_spike_train))) - set(indices_1)), dtype=int)
+            indices_2 = np.sort(np.array(list(set(range(len(original_spike_train))) - set(indices_1)), dtype=int))
             spike_train_2 = original_spike_train[indices_2]
             del original_spike_train
 

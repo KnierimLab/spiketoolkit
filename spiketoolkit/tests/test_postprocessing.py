@@ -1,25 +1,29 @@
 import numpy as np
 import pytest
-from spiketoolkit.tests.utils import create_signal_with_known_waveforms
+from spiketoolkit.tests.utils import create_signal_with_known_waveforms, create_dumpable_extractors_from_existing
 import spikeextractors as se
 from spiketoolkit.postprocessing import get_unit_waveforms, get_unit_templates, get_unit_amplitudes, \
     get_unit_max_channels, set_unit_properties_by_max_channel_properties, compute_unit_pca_scores, export_to_phy, \
-    compute_unit_template_features
+    compute_unit_template_features, compute_channel_spiking_activity, compute_unit_centers_of_mass
 from spiketoolkit.preprocessing import remove_bad_channels
 import pandas
 import os
 import shutil
 from pathlib import Path
-from spiketoolkit.tests.utils import create_dumpable_extractors_from_existing
+import sys
+
+if sys.platform == "win32":
+    memmaps = [False]
+else:
+    memmaps = [False, True]
 
 
 @pytest.mark.implemented
 def test_waveforms():
     n_wf_samples = 100
     n_jobs = [0, 2]
-    memmap = [True, False]
     for n in n_jobs:
-        for m in memmap:
+        for m in memmaps:
             print('N jobs', n, 'memmap', m)
             folder = 'test'
             if os.path.isdir(folder):
@@ -35,6 +39,14 @@ def test_waveforms():
             # no group
             wav = get_unit_waveforms(rec, sort, ms_before=ms_cut, ms_after=ms_cut, save_property_or_features=False,
                                      n_jobs=n, memmap=m, recompute_info=True)
+
+            for (w, w_gt) in zip(wav, waveforms):
+                assert np.allclose(w, w_gt)
+            assert 'waveforms' not in sort.get_shared_unit_spike_feature_names()
+
+            # small chunks
+            wav = get_unit_waveforms(rec, sort, ms_before=ms_cut, ms_after=ms_cut, save_property_or_features=False,
+                                     n_jobs=n, memmap=m, chunk_mb=5, recompute_info=True)
 
             for (w, w_gt) in zip(wav, waveforms):
                 assert np.allclose(w, w_gt)
@@ -152,9 +164,8 @@ def test_max_chan():
 @pytest.mark.implemented
 def test_amplitudes():
     n_jobs = [0, 2]
-    memmap = [True, False]
     for n in n_jobs:
-        for m in memmap:
+        for m in memmaps:
             print('N jobs', n, 'memmap', m)
             n_wf_samples = 100
             folder = 'test'
@@ -192,6 +203,99 @@ def test_amplitudes():
 
 
 @pytest.mark.implemented
+def test_spiking_activity():
+    n_jobs = [0, 2]
+    num_channels = 32
+    folder = 'test'
+    for n in n_jobs:
+        print('N jobs', n)
+        if os.path.isdir(folder):
+            shutil.rmtree(folder)
+        rec, sort = se.example_datasets.toy_example(num_channels=num_channels, dumpable=True, dump_folder=folder)
+        rates, amps = compute_channel_spiking_activity(rec, n_jobs=n)
+
+        assert len(rates) == num_channels and len(amps) == num_channels
+        assert 'spike_rate' in rec.get_shared_channel_property_names()
+        assert 'spike_amplitude' in rec.get_shared_channel_property_names()
+
+        shutil.rmtree(folder)
+
+
+@pytest.mark.notimplemented
+def test_compute_pca_scores():
+    num_channels = 32
+    folder = 'test'
+    n_jobs = [0, 2]
+    for n in n_jobs:
+        for m in memmaps:
+            print('N jobs', n, 'memmap', m)
+
+            if os.path.isdir(folder):
+                shutil.rmtree(folder)
+            rec, sort = se.example_datasets.toy_example(num_channels=num_channels, dumpable=True, dump_folder=folder)
+
+            pca_scores = compute_unit_pca_scores(rec, sort, n_comp=5, memmap=m, n_jobs=n,
+                                                 save_property_or_features=False)
+            for pc in pca_scores:
+                assert pc.shape[-1] == 5
+            assert 'pca_scores' not in sort.get_shared_unit_spike_feature_names()
+
+
+            pca_scores = compute_unit_pca_scores(rec, sort, unit_ids=np.asarray([1,2]), channel_ids=[0, 1, 2, 3, 4],
+                                                 max_channels_per_waveforms=3, n_comp=3, memmap=m, n_jobs=n)
+            assert len(pca_scores) == 2
+            for pc in pca_scores:
+                assert pc.shape[-1] == 3
+            assert 'pca_scores' not in sort.get_shared_unit_spike_feature_names()
+            assert 'pca_scores_channel_idxs' not in sort.get_shared_unit_property_names()
+
+            pca_scores = compute_unit_pca_scores(rec, sort, channel_ids=[0, 1, 2, 3, 4],
+                                                 max_channels_per_waveforms=3, n_comp=3, memmap=m, n_jobs=n)
+            for pc in pca_scores:
+                assert pc.shape[-1] == 3
+            assert 'pca_scores' in sort.get_shared_unit_spike_feature_names()
+            assert 'pca_scores_channel_idxs' in sort.get_shared_unit_property_names()
+
+            shutil.rmtree(folder)
+
+
+@pytest.mark.notimplemented
+def test_compute_centers_of_mass():
+    num_channels = 32
+    folder = 'test'
+    n_jobs = [0, 2]
+    locations = np.zeros((num_channels, 2))
+    radius = 100
+    # create circular locations
+    for i in np.arange(num_channels):
+        angle = 2*np.pi / num_channels * i
+        locations[i, 0] = np.cos(angle) * radius
+        locations[i, 1] = np.sin(angle) * radius
+
+    for n in n_jobs:
+        for m in memmaps:
+            print('N jobs', n, 'memmap', m)
+
+            if os.path.isdir(folder):
+                shutil.rmtree(folder)
+            rec, sort = se.example_datasets.toy_example(num_channels=num_channels, dumpable=True, dump_folder=folder)
+            rec.set_channel_locations(locations)
+
+            coms = compute_unit_centers_of_mass(rec, sort, num_channels=None, memmap=m, n_jobs=n,
+                                                save_property_or_features=False)
+            for com in coms:
+                assert np.linalg.norm(com) <= radius
+            assert 'com' not in sort.get_shared_unit_property_names()
+
+            coms = compute_unit_centers_of_mass(rec, sort, num_channels=5, memmap=m, n_jobs=n)
+            for com in coms:
+                assert np.linalg.norm(com) <= radius
+            assert 'com' in sort.get_shared_unit_property_names()
+
+            shutil.rmtree(folder)
+
+
+@pytest.mark.implemented
 def test_export_to_phy():
     folder = 'test'
     if os.path.isdir(folder):
@@ -220,13 +324,11 @@ def test_export_to_phy():
     assert not (Path('phy_no_amp_feat') / 'pc_features.npy').is_file()
     assert not (Path('phy_no_amp_feat') / 'pc_feature_ind.npy').is_file()
 
-    sort_phy = se.PhySortingExtractor('phy', load_waveforms=True)
-    sort_phyg = se.PhySortingExtractor('phy_group', load_waveforms=True)
+    sort_phy = se.PhySortingExtractor('phy')
+    sort_phyg = se.PhySortingExtractor('phy_group')
 
     assert np.allclose(sort_phy.get_unit_spike_train(0), sort.get_unit_spike_train(sort.get_unit_ids()[0]))
     assert np.allclose(sort_phyg.get_unit_spike_train(2), sort.get_unit_spike_train(sort.get_unit_ids()[2]))
-    assert sort_phy.get_unit_spike_features(1, 'waveforms').shape[1] == 8
-    assert sort_phyg.get_unit_spike_features(3, 'waveforms').shape[1] == 4
 
     rec.set_channel_groups([0, 0, 0, 0, 1, 1, 1, 1])
     recrm = remove_bad_channels(rec, [1, 2, 5])
@@ -234,15 +336,18 @@ def test_export_to_phy():
     templates_ind = np.load('phy_rm/template_ind.npy')
     assert len(np.where(templates_ind == -1)[0]) > 0  # removed channels are -1
 
-    shutil.rmtree('test')
-    shutil.rmtree('phy')
-    shutil.rmtree('phy_group')
-    shutil.rmtree('phy_max_channels')
-    shutil.rmtree('phy_no_feat')
-    shutil.rmtree('phy_no_amp')
-    shutil.rmtree('phy_no_amp_feat')
-    shutil.rmtree('phy_rm')
-    shutil.rmtree('phy_par')
+    try:
+        shutil.rmtree('test')
+        shutil.rmtree('phy')
+        shutil.rmtree('phy_group')
+        shutil.rmtree('phy_max_channels')
+        shutil.rmtree('phy_no_feat')
+        shutil.rmtree('phy_no_amp')
+        shutil.rmtree('phy_no_amp_feat')
+        shutil.rmtree('phy_rm')
+        shutil.rmtree('phy_par')
+    except:
+        print("Could not delete some test folders")
 
 
 @pytest.mark.implemented
@@ -293,10 +398,5 @@ def test_compute_features():
     assert np.all([fk in features.keys() for fk in features_df.keys()])
 
 
-@pytest.mark.notimplemented
-def test_compute_pca_scores():
-    pass
-
-
 if __name__ == '__main__':
-    test_waveforms()
+    test_spiking_activity()

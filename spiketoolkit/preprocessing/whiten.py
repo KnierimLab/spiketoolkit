@@ -3,17 +3,12 @@ import numpy as np
 
 
 class WhitenRecording(FilterRecording):
-
     preprocessor_name = 'Whiten'
-    installed = True  # check at class level if installed or not
-    installation_mesg = ""  # err
 
     def __init__(self, recording, chunk_size=30000, cache_chunks=False, seed=0):
-        self._recording = recording
-        self._whitening_matrix = self._compute_whitening_matrix(seed=seed)
         FilterRecording.__init__(self, recording=recording, chunk_size=chunk_size, cache_chunks=cache_chunks)
-        self.is_filtered = self._recording.is_filtered
-
+        self._whitening_matrix = self._compute_whitening_matrix(seed=seed)
+        self.has_unscaled = False
         self._kwargs = {'recording': recording.make_serialized_dict(), 'chunk_size': chunk_size,
                         'cache_chunks': cache_chunks, 'seed': seed}
 
@@ -39,18 +34,16 @@ class WhitenRecording(FilterRecording):
         U, S, Ut = np.linalg.svd(AAt, full_matrices=True)
         W = (U @ np.diag(1 / np.sqrt(S))) @ Ut
         
-        # proposed by Alessio
-        # AAt = data @ data.T / data.shape[1]
-        # D, V = np.linalg.eig(AAt)
-        # W = np.dot(np.diag(1.0 / np.sqrt(D + 1e-10)), V)
-        
         return W
 
-    def filter_chunk(self, *, start_frame, end_frame):
-        chunk = self._recording.get_traces(start_frame=start_frame, end_frame=end_frame)
+    def filter_chunk(self, start_frame, end_frame, channel_ids, return_scaled):
+        assert return_scaled, "'whiten' only supports return_scaled=True"
+
+        chan_idxs = np.array([self.get_channel_ids().index(chan) for chan in channel_ids])
+        chunk = self._recording.get_traces(start_frame=start_frame, end_frame=end_frame, return_scaled=return_scaled)
         chunk = chunk - np.mean(chunk, axis=1, keepdims=True)
         chunk2 = self._whitening_matrix @ chunk
-        return chunk2
+        return chunk2[chan_idxs]
 
 
 def whiten(recording, chunk_size=30000, cache_chunks=False, seed=0):
